@@ -39,13 +39,13 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(PAL_test PAL_test.c )
+add_executable(PAL_test PAL_test.cpp )
 
 pico_set_program_name(PAL_test "PAL_test")
 pico_set_program_version(PAL_test "0.1")
 
 # Generate PIO header
-pico_generate_pio_header(PAL_test ${CMAKE_CURRENT_LIST_DIR}/blink.pio)
+#pico_generate_pio_header(PAL_test ${CMAKE_CURRENT_LIST_DIR}/blink.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(PAL_test 1)
