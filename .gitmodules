@@ -1,0 +1,3 @@
+[submodule "redpicolib"]
+	path = redpicolib
+	url = https://github.com/RedOrbweaver/redpicolib
