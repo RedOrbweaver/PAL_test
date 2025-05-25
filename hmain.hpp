@@ -13,6 +13,7 @@
 #include "hardware/uart.h"
 
 #include "redpicolib/RedPicoLib.hpp"
+#include "dac_out.pio.h"
 
 namespace PIN
 {

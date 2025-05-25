@@ -1,0 +1,39 @@
+
+.program dac_out
+.wrap_target
+out pins, 8
+.wrap
+
+% c-sdk {
+
+// it was supposed to max out at 1, scope seams to say 1.25, so 1.35 for some margin
+// luckily the TV doesn't seem to be susper sensitive to exact voltage
+// the white voltage level should be around 128 to allow some code optimisations!!!
+#define DIVISIONS_PER_VOLT (255/1.2)
+
+#define PIN_COUNT 8
+static inline void dac_program_init(PIO pio, uint sm, uint offset, uint pin_base, float divider) {
+    for(uint i=pin_base; i<pin_base+PIN_COUNT; i++) {
+        pio_gpio_init(pio, i);
+    }
+    pio_sm_set_consecutive_pindirs(pio, sm, pin_base, PIN_COUNT, true);
+
+    pio_sm_config c = dac_program_get_default_config(offset); // get a default config, this function call is auto-generated
+
+    // change # of bits here if we want to write a 32-bit word and then go through it
+    sm_config_set_out_shift(&c, true, true, 32); // true - shift right, auto pull, # of bits
+
+    sm_config_set_out_pins(&c, pin_base, PIN_COUNT);
+
+    sm_config_set_clkdiv(&c, divider);
+
+    // join the FIFO buffers to get more DMA throughput?
+    // we use the transmit only so join RX to the TX?
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+    pio_sm_clear_fifos(pio, sm);
+}
+
+%}
