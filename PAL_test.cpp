@@ -16,11 +16,78 @@ constexpr float FRONT_PORCH_NS = 1650.0f;
 constexpr float BACK_PORCH_NS = 5700.0f;
 constexpr float VISUAL_NS = 52000.0f;
 
+
+constexpr int black = 80;
+constexpr int zero = 0;
+
+constexpr int lines_x = 408;
+constexpr int lines_y = 304;
+constexpr int samples_per_pixel = 2;
+constexpr int send_buffer_size = lines_x*samples_per_pixel;
+
 pio_hw_t* pio;
 int sm;
 uint dmachan;
 
 
+uint8_t video_data[lines_y][lines_x] = {0};
+uint8_t color_data[lines_y][lines_x/2] = {0};
+uint8_t send_buffer[send_buffer_size] = {0};
+
+
+uint64_t cmptm = 0;
+uint64_t cmptm_tot = 0;
+uint64_t cmptm_max = 0;
+
+
+void WriteColor(int x, int y, uint8_t val)
+{
+    assert(val <= 15);
+
+    uint8_t cv = color_data[y][x/2];
+    if(x & 0b1)
+    {
+        cv = (cv & 0b11110000) | val;
+    }
+    else
+    {
+        cv = (cv & 0b00001111) | (val << 4);
+    }
+    color_data[y][x/2] = cv;
+}
+uint8_t ReadColor(int x, int y)
+{
+    uint8_t cv = color_data[y][x/2];
+    if(x & 0b1)
+    {
+        return (cv & 0b00001111);
+    }
+    else
+    {
+        return (cv & 0b11110000) >> 4;
+    }
+}
+void ComputeSendBuffer(int line)
+{
+    cmptm = get_time_us();
+
+    for(int i = 0; i < send_buffer_size; i++)
+    {
+        uint8_t v = video_data[line][i/samples_per_pixel];
+        uint8_t color = ReadColor(i/samples_per_pixel, line);
+        if(color == 1)
+            v = black;
+        else if(v == black && color == 2)
+            v = black+100;
+        send_buffer[i] = v;
+
+    }
+
+    cmptm = get_time_us() - cmptm;
+    cmptm_tot += cmptm;
+    if(cmptm > cmptm_max)
+        cmptm_max = cmptm;
+}
 
 #define PIN_COUNT 8
 static inline void dac_program_init(PIO pio, uint sm, uint offset, uint pin_base, float divider) 
@@ -141,9 +208,6 @@ int main()
     adc_set_temp_sensor_enabled(true);
 
 
-    const int black = 80;
-    const int zero = 0;
-
     uint8_t long_sync[320] = {0};
     memset(long_sync, 0, ArraySize(long_sync));
     memset(long_sync + 320 - 47 - 1, black, 47);
@@ -151,13 +215,9 @@ int main()
     memset(short_sync, black, ArraySize(short_sync));
     memset(short_sync, zero, 24);
 
-    const int lines_x = 408;
-    const int lines_y = 304;
-    const float div = 30;
-    const float line_div = 38.23;
 
 
-    uint8_t video_data[lines_y][lines_x];
+
 
     for(int i = 0; i < lines_y; i++)
     {
@@ -170,22 +230,32 @@ int main()
             else
                 val = black;
             video_data[i][ii] = val;
+            if(dist < 25)
+                WriteColor(ii, i, 1);
+            else if(dist < 100)
+                WriteColor(ii, i, 2);
+            else
+                WriteColor(ii, i, 4);
         }
     }
-
-    uint8_t front_porch[16];
-    for(int i = 0; i < ArraySize(front_porch); i++)
+    struct
     {
-        front_porch[i] = black;
+        uint8_t front_porch[16];
+        uint8_t line_sync[48] = {0};
+        uint8_t back_porch[56];
+    }fb = {0};
+    for(int i = 0; i < ArraySize(fb.front_porch); i++)
+    {
+        fb.front_porch[i] = black;
     }
-    uint8_t line_sync[48] = {0};
-    uint8_t back_porch[56];
-    for(int i = 0; i < ArraySize(back_porch); i++)
+    for(int i = 0; i < ArraySize(fb.back_porch); i++)
     {
-        back_porch[i] = black;
+        fb.back_porch[i] = black;
     }
 
     
+const float div = 30;
+const float line_div = 38.23/samples_per_pixel;//9.5588331;
 
     while(true)
     {
@@ -198,12 +268,20 @@ int main()
         {
             dac_send_array(short_sync, div);
         }
+        ComputeSendBuffer(0);
         for(int i = 0; i < lines_y; i++)
         {
-            dac_send_array(front_porch, div);
-            dac_write(line_sync, ArraySize(line_sync), div);
-            dac_write(back_porch, ArraySize(back_porch), div);
-            dac_write(video_data[i], lines_x, line_div);
+            // dac_send_array(front_porch, div);
+            // dac_write(line_sync, ArraySize(line_sync), div);
+            // dac_write(back_porch, ArraySize(back_porch), div);
+            dac_write((uint8_t*)&fb, sizeof(fb), div);
+            
+            dac_write(send_buffer, send_buffer_size, line_div);
+
+            if(i != lines_y-1)
+                ComputeSendBuffer(i+1);
+
+            //dac_write(video_data[i], lines_x, line_div*samples_per_pixel);
         }
         for(int i = 0; i < 6; i++)
         {
@@ -211,6 +289,9 @@ int main()
         }
         uint64_t tmdif = (get_time_us()-tm);
         double rtm = double(tmdif) / 1000.0;
-        printf("%.4f\n", rtm);
+        float average = float(cmptm_tot) / float(lines_y);
+        printf("%.4f %lli %lli %lli %.3f\n", rtm, cmptm, cmptm_max, cmptm_tot, average);
+        cmptm_tot = 0;
+        cmptm_max = 0;
     }
 }
