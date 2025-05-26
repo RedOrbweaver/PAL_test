@@ -18,7 +18,7 @@ static inline void dac_program_init(PIO pio, uint sm, uint offset, uint pin_base
     }
     pio_sm_set_consecutive_pindirs(pio, sm, pin_base, PIN_COUNT, true);
 
-    pio_sm_config c = dac_program_get_default_config(offset); // get a default config, this function call is auto-generated
+    pio_sm_config c = dac_out_program_get_default_config(offset); // get a default config, this function call is auto-generated
 
     // change # of bits here if we want to write a 32-bit word and then go through it
     sm_config_set_out_shift(&c, true, true, 32); // true - shift right, auto pull, # of bits

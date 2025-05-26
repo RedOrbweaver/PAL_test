@@ -11,6 +11,7 @@
 #include "hardware/watchdog.h"
 #include "hardware/clocks.h"
 #include "hardware/uart.h"
+#include "hardware/adc.h"
 
 #include "redpicolib/RedPicoLib.hpp"
 #include "dac_out.pio.h"

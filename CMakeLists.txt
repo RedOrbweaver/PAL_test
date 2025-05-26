@@ -70,6 +70,7 @@ target_link_libraries(PAL_test
         hardware_timer
         hardware_watchdog
         hardware_clocks
+        hardware_adc
         )
 
 pico_add_extra_outputs(PAL_test)
