@@ -20,6 +20,34 @@ pio_hw_t* pio;
 int sm;
 uint dmachan;
 
+
+
+#define PIN_COUNT 8
+static inline void dac_program_init(PIO pio, uint sm, uint offset, uint pin_base, float divider) 
+{
+    for(uint i=pin_base; i<pin_base+PIN_COUNT; i++) 
+    {
+        pio_gpio_init(pio, i);
+    }
+    pio_sm_set_consecutive_pindirs(pio, sm, pin_base, PIN_COUNT, true);
+
+    pio_sm_config c = dac_out_program_get_default_config(offset); 
+
+    sm_config_set_out_shift(&c, true, true, 32); // true - shift right, auto pull, # of bits
+
+    sm_config_set_out_pins(&c, pin_base, PIN_COUNT);
+
+    sm_config_set_clkdiv(&c, divider);
+
+    // join the FIFO buffers to get more DMA throughput?
+    // we use the transmit only so join RX to the TX?
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+    pio_sm_clear_fifos(pio, sm);
+}
+
 void dac_push_output(uint32_t values)
 {
     pio_sm_put(pio0, 0, values);
@@ -28,87 +56,27 @@ void dac_push_output(uint32_t values)
 
 void dma_init(pio_hw_t* pio, int sm)
 {
-    //assert(len % 4 == 0);
 
-    //static uint8_t* lookup_source = source;
+    dmachan = dma_claim_unused_channel(true);    
 
-    auto dmaDataChan = dma_claim_unused_channel(true);
-    auto dmaCtrlChan = dma_claim_unused_channel(true);
-
-    // // Configure the control channel to restart the data channel when it's done
-    // auto ctrlChanConfig = dma_channel_get_default_config(dmaCtrlChan);
-    // channel_config_set_transfer_data_size(&ctrlChanConfig, DMA_SIZE_32);
-    // channel_config_set_read_increment(&ctrlChanConfig, false);
-    // channel_config_set_write_increment(&ctrlChanConfig, false);
-    // channel_config_set_chain_to(&ctrlChanConfig, dmaDataChan);
-    // channel_config_set_irq_quiet(&ctrlChanConfig, true);
-    // channel_config_set_high_priority(&ctrlChanConfig, true);
-    // channel_config_set_enable(&ctrlChanConfig, true);
-    // dma_channel_configure(
-    //     dmaCtrlChan, 
-    //     &ctrlChanConfig, 
-    //     // Write to the read address of the data channel
-    //     &dma_hw->ch[dmaDataChan].read_addr,
-    //     // Read from the sample points data pointer
-    //     &lookup_source,
-    //     // One 32-bit word
-    //     1,
-    //     // Don't start yet
-    //     false);
-
-    // // Configure the data channel to output 32 bits at a time to the PIO state machine
-    // auto dataChanConfig = dma_channel_get_default_config(dmaDataChan);
-    // channel_config_set_transfer_data_size(&dataChanConfig, DMA_SIZE_32);
-    // channel_config_set_read_increment(&dataChanConfig, true);
-    // channel_config_set_write_increment(&dataChanConfig, false);
-    // channel_config_set_dreq(&dataChanConfig, pio_get_dreq(pio, sm, true));
-    // channel_config_set_chain_to(&dataChanConfig, dmaCtrlChan);
-    // channel_config_set_irq_quiet(&dataChanConfig, true);
-    // channel_config_set_high_priority(&dataChanConfig, true);
-    // channel_config_set_enable(&dataChanConfig, true);
-    // dma_channel_configure(
-    //     dmaDataChan,
-    //     &dataChanConfig,
-    //     // Write to the FIFO
-    //     &pio->txf[sm],
-    //     // Read from the sample points data
-    //     lookup_source,
-    //     len / 4,
-    //     // Don't start yet
-    //     false);
-
-    // dma_start_channel_mask((1u << dmaDataChan) | (1u << dmaCtrlChan));
-
-    //while(true) tight_loop_contents();
-
-    dmachan = dmaDataChan;
-
-    auto dataChanConfig = dma_channel_get_default_config(dmaDataChan);
-    channel_config_set_transfer_data_size(&dataChanConfig, DMA_SIZE_32);
-    channel_config_set_read_increment(&dataChanConfig, true);
-    channel_config_set_write_increment(&dataChanConfig, false);
-    channel_config_set_dreq(&dataChanConfig, pio_get_dreq(pio, sm, true));
-    //channel_config_set_chain_to(&dataChanConfig, dmaCtrlChan);
-    channel_config_set_irq_quiet(&dataChanConfig, true);
-    channel_config_set_high_priority(&dataChanConfig, true);
-    channel_config_set_enable(&dataChanConfig, true);
+    auto c = dma_channel_get_default_config(dmachan);
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
+    channel_config_set_read_increment(&c, true);
+    channel_config_set_write_increment(&c, false);
+    channel_config_set_dreq(&c, pio_get_dreq(pio, sm, true));
+    channel_config_set_irq_quiet(&c, true);
+    channel_config_set_high_priority(&c, true);
+    channel_config_set_enable(&c, true);
     dma_channel_configure(
-        dmaDataChan,
-        &dataChanConfig,
+        dmachan,
+        &c,
         // Write to the FIFO
         &pio->txf[sm],
-        // Read from the sample points data
         NULL,
         0,
-        // Don't start yet
         false);
     
-    dma_channel_start(dmaDataChan);
-    // while(true)
-    // {
-    //     dma_channel_set_read_addr(dmaDataChan, lookup, true);
-    //     dma_channel_wait_for_finish_blocking(dmaDataChan);
-    // }
+    dma_channel_start(dmachan);
 }
 
 void pio_init()
@@ -245,14 +213,4 @@ int main()
         double rtm = double(tmdif) / 1000.0;
         printf("%.4f\n", rtm);
     }
-
-    // while (true) 
-    // {
-    //     for(int i = 0; i < 64; i++)
-    //     {
-    //         dac_push_output(*(uint32_t*)(sin_lookup+(i*4)));
-    //         //sleep_us(10);
-    //     }
-    //     //sleep_us(100);
-    // }
 }
